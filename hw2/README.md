@@ -1,6 +1,8 @@
 # OS
 운영체제 프로그래밍 과제
+
 < CPU Scheduling Simulator >
+
 이번 프로그래밍 과제 수업 시간에 배운 프로세스의 상태전환(Process State Transitions)과 CPU Scheduling에서 여러 가지 Scheduling 기법을 구현하여 시뮬레이션 해 보는 것입니다. 실 제 process 가 수행하는 것을 정확히 시뮬레이션 하는 것은 여러 가지 어려움이 있기에 CPU Scheduling을 간단한 프로세스 수행 모델 (Process Execution Model) 하에서 구현 합니다.
 Process Execution Model
 시뮬레이션 동안 생성될 프로세스의 수행시간, 프로세스의 생성 시간, IO 요청이 발생하는 시간 과 IO 요청의 처리 시간은 시뮬레이션이 시작하기에 정해지면 각각 다음의 배열에 저장됩니다. procServTime[], procIntArrTime[], ioReqIntArrTime[], ioServTime[].
