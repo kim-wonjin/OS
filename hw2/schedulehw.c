@@ -142,16 +142,16 @@ void	print_io_queue(void)
 
 void Enqueue(struct process *quename, struct process *proc_to_add)
 {
-	(*quename).len++;
-	if ((*quename).next == quename)// first item
+	quename->len++;
+	if (quename->next == quename)// first item
 	{
-		(*quename).next = proc_to_add;
-		(*proc_to_add).prev = quename;
-		last = (*quename).next;
+		quename->next = proc_to_add;
+		proc_to_add->prev = quename;
+		last = quename->next;
 	}
 	else
 	{
-		(*proc_to_add).prev = last;
+		proc_to_add->prev = last;
 		last->next = proc_to_add;
 		last = last->next;
 	}
@@ -159,32 +159,31 @@ void Enqueue(struct process *quename, struct process *proc_to_add)
 
 void Dequeue(struct process *quename, struct process *proc_to_rm)
 {
-	(*quename).len--;
-	if ((*proc_to_rm).next == NULL && (*proc_to_rm).prev == quename)// 1 item left
+	quename->len--;
+	if (proc_to_rm->next == NULL && proc_to_rm->prev == quename)// 1 item left
 	{
-		(*quename).next = (*quename).prev = quename;
+		quename->next = quename->prev = quename;
 		last = NULL;
 	}
-	else if ((*proc_to_rm).prev == quename)//first
+	else if (proc_to_rm->prev == quename)//first
 	{
-		(*proc_to_rm).next->prev = quename;
-		(*quename).next = (*proc_to_rm).next;
+		proc_to_rm->next->prev = quename;
+		quename->next = proc_to_rm->next;
 	}
-	else if ((*proc_to_rm).next == NULL)//last
+	else if (proc_to_rm->next == NULL)//last
 	{
-		(*proc_to_rm).prev->next = NULL;
-		last = (*proc_to_rm).prev;
+		proc_to_rm->prev->next = NULL;
+		last = proc_to_rm->prev;
 	}
-	else if ((*proc_to_rm).next == NULL && (*proc_to_rm).prev == NULL)
+	else if (proc_to_rm->next == NULL && proc_to_rm->prev == NULL)
 		printf("error\n");
 	else 
 	{
-		(*proc_to_rm).prev->next = (*proc_to_rm).next;
-		(*proc_to_rm).next->prev = (*proc_to_rm).prev;
+		proc_to_rm->prev->next = proc_to_rm->next;
+		proc_to_rm->next->prev = proc_to_rm->prev;
 	}
-	
-	(*proc_to_rm).next = NULL;
-	(*proc_to_rm).prev = NULL;
+	proc_to_rm->next = NULL;
+	proc_to_rm->prev = NULL;
 }
 
 void procExecSim(struct process *(*scheduler)()) {
@@ -283,7 +282,7 @@ void procExecSim(struct process *(*scheduler)()) {
 			ptr = ptr->next;
 		}
 
-		if (cpuUseTime == nextIOReqTime && runningProc->state == S_RUNNING) { /* CASE 5: reqest IO operations (only when the process does not terminate) */
+		if (cpuUseTime == nextIOReqTime) { /* CASE 5: reqest IO operations (only when the process does not terminate) */
 			//if (qTime != 0) //iobound
 			printf("ioreq! : %d\n",runningProc->id);
 			runningProc->priority++;
@@ -308,6 +307,8 @@ void procExecSim(struct process *(*scheduler)()) {
 			}
 			if (nioreq < NIOREQ - 1)
 				nextIOReqTime += ioReqIntArrTime[++nioreq];
+			else
+				nextIOReqTime = 0;
 		}
 
 		if (runningProc->serviceTime == runningProc->targetServiceTime) { /* CASE 4 : the process job done and terminates */
@@ -335,6 +336,7 @@ void procExecSim(struct process *(*scheduler)()) {
 			{
 				runningProc = scheduler();
 				runningProc->state = S_RUNNING;
+				qTime = 0;
 				cpuReg0 = runningProc->saveReg0;
 				cpuReg1 = runningProc->saveReg1;
 				Dequeue(&readyQueue, runningProc);
