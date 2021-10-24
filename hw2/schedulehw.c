@@ -1,4 +1,6 @@
-//
+// 
+// 2021
+// Operating System
 // CPU Schedule Simulator Homework
 // Student Number : B911040
 // Name : 김원진
@@ -101,45 +103,6 @@ void initioDoneEvent() {
 	}
 }
 
-void	print_ready_queue(void)
-{
-	struct process *cur;
-
-	printf("ready queue: ");
-	if (readyQueue.next == &readyQueue )
-	{
-		printf("(null)\n");
-		return ;
-	}
-	cur = readyQueue.next;
-	while (cur)
-	{
-		printf("%d ", cur->id);
-		cur = cur->next;
-	}
-	printf("\n");
-}
-
-void	print_io_queue(void)
-{
-	struct ioDoneEvent *cur;
-
-	printf("io queue: ");
-	if (ioDoneEventQueue.next == &ioDoneEventQueue)
-	{
-		printf("(null)\n");
-		return ;
-	}
-	cur = ioDoneEventQueue.next;
-	while (cur)
-	{
-		printf("%d", cur->procid);
-		printf("(%d) ", cur->doneTime);
-		cur = cur->next;
-	}
-	printf("\n");
-}
-
 void Enqueue(struct process *quename, struct process *proc_to_add)
 {
 	quename->len++;
@@ -214,7 +177,7 @@ void procExecSim(struct process *(*scheduler)()) {
 		}
 		// MUST CALL compute() Inside While loop
 		if (currentTime == nextForkTime) { /* CASE 2 : a new process created */
-			printf("new! : %d\n", nproc);
+	//		printf("new! : %d\n", nproc);
 			procTable[nproc].state = S_READY;
 			Enqueue(&readyQueue, &procTable[nproc]);
 			procTable[nproc].startTime = currentTime;
@@ -226,8 +189,7 @@ void procExecSim(struct process *(*scheduler)()) {
 		}
 
 		if (qTime == QUANTUM ) { /* CASE 1 : The quantum expires */
-			printf("quantum!\n");
-			qTime = 0;
+		//	printf("quantum!\n");
 			if (runningProc->state == S_RUNNING)
 			{
 				runningProc->priority--; //cpubound
@@ -242,39 +204,42 @@ void procExecSim(struct process *(*scheduler)()) {
 			if(ptr->doneTime == currentTime)
 			{
 				pid = ptr->procid;
-				printf("iodone! : %d\n",pid);
+			//	printf("iodone! : %d\n",pid);
 				if (procTable[pid].state == S_BLOCKED)
 				{
-					//Dequeue(&blockedQueue, &procTable[pid]);
 					procTable[pid].state = S_READY;
 					Enqueue(&readyQueue, &procTable[pid]);
 				}
 				//dequeue iodone
-				ptr->procid = -1;
-				ptr->doneTime = INT_MAX;
+				struct ioDoneEvent * deq = ptr;
+				ptr = ptr->prev;
+				deq->procid = -1;
+				deq->doneTime = INT_MAX;
 				ioDoneEventQueue.len--;
-				if (ptr->next == NULL && ptr->prev == &ioDoneEventQueue)//1 item left
+				
+				if (deq->next == NULL && deq->prev == &ioDoneEventQueue)//1 item left
 				{
 					ioDoneEventQueue.next = ioDoneEventQueue.prev = &ioDoneEventQueue;
 					last_ = NULL;
 				}
-				else if (ptr->prev == &ioDoneEventQueue)//first
+				else if (deq->prev == &ioDoneEventQueue)//first
 				{
-					ptr->next->prev = &ioDoneEventQueue;
-					ioDoneEventQueue.next = ptr->next;
+					deq->next->prev = &ioDoneEventQueue;
+					ioDoneEventQueue.next = deq->next;
 				}
-				else if (ptr->next == NULL)//last
+				else if (deq->next == NULL)//last
 				{
-						ptr->prev->next = NULL;
-						last_ = ptr->prev;
+						deq->prev->next = NULL;
+						last_ = deq->prev;
 				}
 				else
 				{
-					ptr->prev->next = ptr->next;
-					ptr->next->prev = ptr->prev;
+					deq->prev->next = deq->next;
+					deq->next->prev = deq->prev;
 				}
-				ptr->next = NULL;
-				ptr->prev = NULL;
+				deq->next = NULL;
+				deq->prev = NULL;
+
 				//runningProc ready
 				if (runningProc->state == S_RUNNING)
 				runningProc_to_ready = 1;
@@ -283,12 +248,11 @@ void procExecSim(struct process *(*scheduler)()) {
 		}
 
 		if (cpuUseTime == nextIOReqTime) { /* CASE 5: reqest IO operations (only when the process does not terminate) */
-			//if (qTime != 0) //iobound
-			printf("ioreq! : %d\n",runningProc->id);
-			runningProc->priority++;
+		//	printf("ioreq! : %d\n",runningProc->id);
+			if (qTime < QUANTUM)
+				runningProc->priority++;
 			runningProc->state = S_BLOCKED;
 			ioDoneEvent[nioreq].procid = runningProc->id;
-			//Enqueue(&blockedQueue, runningProc);
 			runningProc_to_ready = 0;
 			ioDoneEvent[nioreq].doneTime = currentTime + ioServTime[nioreq];
 			ioDoneEvent->len++;
@@ -312,7 +276,7 @@ void procExecSim(struct process *(*scheduler)()) {
 		}
 
 		if (runningProc->serviceTime == runningProc->targetServiceTime) { /* CASE 4 : the process job done and terminates */
-			printf("terminate! : %d\n", runningProc->id);
+	//		printf("terminate! : %d\n", runningProc->id);
 			runningProc->state = S_TERMINATE;
 			runningProc->endTime = currentTime;
 			termProc++;
@@ -324,10 +288,8 @@ void procExecSim(struct process *(*scheduler)()) {
 			runningProc->state = S_READY;
 			Enqueue(&readyQueue,runningProc);			
 		}
+
 		// call scheduler() if needed
-		print_ready_queue();
-		print_io_queue();
-		printf("\n");
 		if (runningProc->state != S_RUNNING)
 		{
 			if (readyQueue.next == &readyQueue)//empty
@@ -342,7 +304,6 @@ void procExecSim(struct process *(*scheduler)()) {
 				Dequeue(&readyQueue, runningProc);
 			}
 		}
-		printf("runninProc : %d\n", runningProc->id);
 		if (termProc == NPROC) //all process terminated
 			break;
 	} // while loop
@@ -395,7 +356,7 @@ struct process* SFSschedule() {
 	struct process* ret = readyQueue.next;
 	while (p != NULL)
 	{
-		if (ret->priority > p->priority)
+		if (ret->priority < p->priority)
 			ret = p;
 		p = p->next;
 	}
