@@ -5,7 +5,7 @@
 | Course | Operating System |
 | Stack           | C                                                            |
 | Topics          | `CPU Scheduling` |
-| Specification | [Homework2](https://github.com/24siefil/Computer_Science/blob/main/OS/oshw2/specification/Homework2.pdf) |
+| Specification | [Homework2](https://github.com/kim-wonjin/OS/blob/main/hw2/Homework2.pdf) |
 
 <br/>
 
