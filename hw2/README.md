@@ -44,7 +44,7 @@
 <br/>
 
 
-# 5. How to execute the program
+# 4. How to execute the program
 
 프로그램은 다음과 같은 인자를 받아 실행된다.
 
@@ -55,7 +55,7 @@
 
 <br/>
 
-# 6. Test result
+# 5. Test result
 
 ```c
 PARAM3 = All Schedule Methods + 10000 10000 50 10 1000 100 1000 1000 100000 10
