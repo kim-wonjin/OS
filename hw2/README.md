@@ -43,11 +43,6 @@
 
 <br/>
 
-# 4. Demo
-
-![oshw2 demo fast](https://user-images.githubusercontent.com/83692797/138303940-e574ef64-331a-4908-9a7c-48c8a7857ae1.gif)
-
-<br/>
 
 # 5. How to execute the program
 
