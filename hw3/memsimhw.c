@@ -31,11 +31,14 @@ struct procEntry {
 	struct pageTableEntry *firstLevelPageTable;
 	FILE *tracefp;
 	int pageTable[0xfffff + 1][2];
+	int ***first_pt;
 };
 
 struct pageFrame {
 	int pid;
 	unsigned vpn;
+	unsigned first_pn;
+	unsigned second_pn;
 	int pfn;
 	struct pageFrame *next;
 };
@@ -62,7 +65,7 @@ void init_pageTable(int numProcess)
 	int i, j;
 	for(i = 0; i < numProcess; i++)
 	{
-		for(j = 0; j < 0xfffff + 1; j++)
+		for(j = 0; j < (1L << 20); j++)
 		{
 			procTable[i].pageTable[j][0] = 0;
 			procTable[i].pageTable[j][1] = 0;
@@ -73,30 +76,33 @@ void init_pageTable(int numProcess)
 void lru(int hitted_pfn)
 {
 	struct pageFrame *p = frame_list_head;
-	struct pageFrame *hitted = &frame_list[hitted_pfn];
-	
-	if (p->pfn == hitted_pfn) // head hit
-		frame_list_head = frame_list_head->next;
-	else
+	struct pageFrame *p_late = frame_list_head;
+
+	if (frame_list_tail->pfn == hitted_pfn) //tail hit
+		return;
+
+	while (p != NULL && p->pfn != hitted_pfn)
 	{
-		while (p->next != NULL && p->next->pfn != hitted_pfn)
-			p = p->next;
+		p_late = p;
+		p = p->next;
 	}
-	
-	p->next = hitted->next;
-	frame_list_tail->next = hitted;
+	if (frame_list_head->pfn == hitted_pfn) //head hit
+		frame_list_head = frame_list_head->next;
+
+	p_late->next = p->next;
+	frame_list_tail->next = p;
 	frame_list_tail = frame_list_tail->next;
 	frame_list_tail->next = NULL;
 }
 
 void update(int i, unsigned new_vpn)
 {
-	int backup_pid;
-	unsigned backup_vpn;
-
-	backup_vpn = frame_list_head->vpn;
-	backup_pid = frame_list_head->pid;
-
+	if (frame_list_head->pid != -1) //invalid
+	{
+		procTable[frame_list_head->pid].pageTable[frame_list_head->vpn][0] = 0;
+		procTable[frame_list_head->pid].pageTable[frame_list_head->vpn][1] = 0;
+	}
+	//allocated
 	frame_list_head->pid = i;
 	frame_list_head->vpn = new_vpn;
 	procTable[i].pageTable[new_vpn][0] = frame_list_head->pfn;
@@ -106,21 +112,13 @@ void update(int i, unsigned new_vpn)
 	frame_list_tail->next = frame_list_head;
 	frame_list_head = frame_list_head->next;
 	frame_list_tail = frame_list_tail->next;
-	frame_list_tail->next = NULL;	
-
-	if (backup_pid != -1) //not first
-	{
-		procTable[backup_pid].pageTable[backup_vpn][0] = 0;
-		procTable[backup_pid].pageTable[backup_vpn][1] = 0;
-	}
+	frame_list_tail->next = NULL;		
 }
 
 void oneLevelVMSim(int simType, int numProcess) {
 	unsigned va;
 	int i;
 	unsigned vpn;
-	unsigned backup_vpn;
-	int backup_pid;
 	int finish = 0;
 
 	init_pageTable(numProcess);
@@ -131,8 +129,8 @@ void oneLevelVMSim(int simType, int numProcess) {
 		{
 			if (procTable[i].end == 1)
 				continue;
-			
-			if (!(va = read_tracefp(i))) //EOF
+				
+			if (!(va = read_tracefp(i)))	
 			{
 				finish ++;
 				procTable[i].end = 1;
@@ -140,15 +138,13 @@ void oneLevelVMSim(int simType, int numProcess) {
 			else
 			{	
 				procTable[i].ntraces++;
-				vpn = (va & 0xfffff000) >> 12;
+				vpn = va  >> 12;
 
 				if (procTable[i].pageTable[vpn][1] == 1) //hit
 				{	
 					procTable[i].numPageHit++;
 					if (simType == 1)
-					{	lru(procTable[i].pageTable[vpn][0]);	
-						printf("%d\n",procTable[i].pageTable[vpn][0])	;	
-					}
+						lru(procTable[i].pageTable[vpn][0]);		
 				}
 				else // miss (fault)
 				{
@@ -170,7 +166,106 @@ void oneLevelVMSim(int simType, int numProcess) {
 	}
 
 }
-/*void twoLevelVMSim(...) {
+
+void init_first_page_table(int numProcess, unsigned first_page_size)
+{
+	int i, j;
+
+	for(i = 0; i < numProcess; i++)
+	{
+		if (!(procTable[i].first_pt = malloc(sizeof(int **) * first_page_size)))
+			exit(1);
+		for (j = 0; j < first_page_size; j++)
+			procTable[i].first_pt[j] = NULL;
+	}
+}
+
+void init_second_page_table(int pid, unsigned first_pn, unsigned second_page_size)
+{
+	int i;
+	
+	if (!(procTable[pid].first_pt[first_pn] = malloc(sizeof(int *) * second_page_size)))
+			exit(1);
+	for (i = 0; i < second_page_size; i++)
+	{
+		if (!(procTable[pid].first_pt[first_pn][i] = malloc(sizeof(int) * 2)))
+			exit(1);
+		procTable[pid].first_pt[first_pn][i][0] = 0;
+		procTable[pid].first_pt[first_pn][i][1] = 0;
+	}	
+}
+
+void update_twolevel(int i, unsigned new_first_pn, unsigned new_second_pn)
+{
+	if (frame_list_head->pid != -1) //invalid
+	{
+		procTable[frame_list_head->pid].first_pt[frame_list_head->first_pn][frame_list_head->second_pn][0] = 0;
+		procTable[frame_list_head->pid].first_pt[frame_list_head->first_pn][frame_list_head->second_pn][1] = 0;
+	}
+	//allocated
+	frame_list_head->pid = i;
+	frame_list_head->first_pn = new_first_pn;
+	frame_list_head->second_pn = new_second_pn;
+	procTable[i].first_pt[new_first_pn][new_second_pn][0] = frame_list_head->pfn;
+	procTable[i].first_pt[new_first_pn][new_second_pn][1] = 1;
+
+	//update head & tail	
+	frame_list_tail->next = frame_list_head;
+	frame_list_head = frame_list_head->next;
+	frame_list_tail = frame_list_tail->next;
+	frame_list_tail->next = NULL;	
+
+}
+
+void twoLevelVMSim(int numProcess, int firstlevelBits) {
+	unsigned va;
+	int i;
+	unsigned first_pn, second_pn;
+	int finish = 0;
+
+	unsigned first_page_size =  1L << firstlevelBits;
+	unsigned second_page_size = 1L << (20 - firstlevelBits);
+
+	init_first_page_table(numProcess, first_page_size);
+
+	while(1)
+	{
+		for (i= 0; i < numProcess; i++)
+		{
+			if (procTable[i].end == 1)
+				continue;
+			
+			if (!(va = read_tracefp(i))) //EOF
+			{
+				finish ++;
+				procTable[i].end = 1;
+			}
+			else
+			{	
+				procTable[i].ntraces++;
+				first_pn = va >> (32 - firstlevelBits);
+				second_pn = (va << firstlevelBits) >> (firstlevelBits+12);
+
+				if (procTable[i].first_pt[first_pn] != NULL && procTable[i].first_pt[first_pn][second_pn][1] == 1) //hit
+				{	
+					procTable[i].numPageHit++;
+					lru(procTable[i].first_pt[first_pn][second_pn][0]);		
+				}
+				else // miss (fault)
+				{
+					procTable[i].numPageFault++;
+					if (procTable[i].first_pt[first_pn] == NULL)
+					{
+						init_second_page_table(i, first_pn, second_page_size);
+						procTable[i].num2ndLevelPageTable++;
+					}
+					update_twolevel(i, first_pn, second_pn);
+				}
+			}		
+		}
+		if (finish == numProcess)
+			break;
+	}
 
 	for(i=0; i < numProcess; i++) {
 		printf("**** %s *****\n",procTable[i].traceName);
@@ -182,7 +277,7 @@ void oneLevelVMSim(int simType, int numProcess) {
 	}
 }
 
-void invertedPageVMSim(...) {
+/*void invertedPageVMSim(...) {
 
 	for(i=0; i < numProcess; i++) {
 		printf("**** %s *****\n",procTable[i].traceName);
@@ -243,6 +338,8 @@ int main(int argc, char *argv[]) {
 	{
 		frame_list[i].pid = -1;
 		frame_list[i].vpn = 0;
+		frame_list[i].first_pn = 0;
+		frame_list[i].second_pn = 0;
 		frame_list[i].pfn = i;
 		
 		if (i == 0)
@@ -280,7 +377,7 @@ int main(int argc, char *argv[]) {
 		printf("=============================================================\n");
 		printf("The Two-Level Page Table Memory Simulation Starts .....\n");
 		printf("=============================================================\n");
-	//	twoLevelVMSim(...);
+		twoLevelVMSim(numProcess, firstlevelBits);
 	}
 
 	if (simType == 3) {
