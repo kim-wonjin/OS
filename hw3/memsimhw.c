@@ -40,8 +40,17 @@ struct pageFrame {
 	unsigned first_pn;
 	unsigned second_pn;
 	int pfn;
+	int hash_index;
 	struct pageFrame *next;
 	struct pageFrame *prev;
+};
+
+struct hash_node {
+	int pid;
+	unsigned vpn;
+	int pfn;
+	struct hash_node *next;
+	struct hash_node *prev;
 };
 
 struct procEntry *procTable;
@@ -49,6 +58,8 @@ struct procEntry *procTable;
 struct pageFrame *frame_list;
 struct pageFrame *frame_list_head;
 struct pageFrame *frame_list_tail;
+
+struct hash_node **hashTable;
 
 unsigned read_tracefp(int pid)
 {
@@ -278,6 +289,158 @@ void twoLevelVMSim(int numProcess, int firstlevelBits) {
 	}
 }
 
+void init_hashTable(int nFrame)
+{
+	int i;
+
+	if(!(hashTable = malloc(sizeof(struct hash_node *) * nFrame)))
+		exit(1);
+	for (i = 0; i < nFrame; i++)
+		hashTable[i] = NULL;
+}
+
+int search_table(int i, int index, unsigned new_vpn)
+{
+	struct hash_node * p = hashTable[index];
+	
+	if (p == NULL) // empty
+	{
+		procTable[i].numIHTNULLAccess++;
+		return (-1);
+	}
+	
+	procTable[i].numIHTNonNULLAcess++;
+
+	while(p != NULL)
+	{
+		procTable[i].numIHTConflictAccess++;
+		if (p->vpn == new_vpn && p->pid == i)
+			return (p->pfn);
+		p = p->next;
+	}
+	return (-1);
+}
+
+void add_new_node(int i, int index, unsigned new_vpn)
+{
+	struct hash_node * new;
+
+	if (!(new = malloc (sizeof(struct hash_node))))
+		exit(1);
+	new->pid = i;
+	new->vpn = new_vpn;
+	new->pfn = frame_list_head->pfn;
+	new->prev = NULL;
+	if (hashTable[index] == NULL) //empty
+	{
+		hashTable[index] = new;
+		new->next = NULL;
+	}
+	else
+	{
+		new->next = hashTable[index];
+		hashTable[index]->prev = new;
+		hashTable[index] = new;
+
+	}
+}
+
+void delete_node(struct hash_node * p)
+{
+	if (p->prev == NULL && p->next == NULL) //only one node
+		hashTable[frame_list_head->hash_index] = NULL;
+	else if (p->prev == NULL) //first node
+	{
+		hashTable[frame_list_head->hash_index] = p->next;
+		p->next->prev = NULL;
+	}
+	else if (p->next == NULL) //last node
+		p->prev->next = NULL;
+	
+	else 
+	{
+		p->prev->next = p->next;
+		p->next->prev = p->prev;
+	}
+	free(p);
+}
+
+void update_inverted(int new_index, int i, unsigned new_vpn)
+{
+	//invalid
+	if (frame_list_head->pid != -1) 
+	{
+		struct hash_node * p = hashTable[frame_list_head->hash_index];
+		while (p->pfn != frame_list_head->pfn)
+			p = p->next;
+		delete_node(p);
+	}
+	//allocated
+	frame_list_head->pid = i;
+	frame_list_head->vpn = new_vpn;
+	frame_list_head->hash_index = new_index;
+	add_new_node(i, new_index, new_vpn);
+
+	move_head_to_tail();	
+}
+
+void invertedPageVMSim(int numProcess, int nFrame) {
+	unsigned va;
+	int i;
+	unsigned vpn;
+	int hash_index;
+	int pfn;
+	int finish = 0;
+
+	init_hashTable(nFrame);
+
+	while(1)
+	{
+		for (i= 0; i < numProcess; i++)
+		{
+			if (procTable[i].end == 1)
+				continue;
+				
+			if (!(va = read_tracefp(i)))	
+			{
+				finish ++;
+				procTable[i].end = 1;
+			}
+			else
+			{	
+				procTable[i].ntraces++;
+				vpn = va  >> 12;
+				hash_index = ((int)vpn + i)% nFrame;
+
+				if ((pfn = search_table(i, hash_index, vpn)) != -1) //hit
+				{	
+					procTable[i].numPageHit++;
+					lru(pfn);		
+				}
+				else // miss (fault)
+				{
+					procTable[i].numPageFault++;
+					update_inverted(hash_index, i, vpn);
+				}
+			}		
+		}
+		if (finish == numProcess)
+			break;
+	}
+
+	for(i=0; i < numProcess; i++) {
+		printf("**** %s *****\n",procTable[i].traceName);
+		printf("Proc %d Num of traces %d\n",i,procTable[i].ntraces);
+		printf("Proc %d Num of Inverted Hash Table Access Conflicts %d\n",i,procTable[i].numIHTConflictAccess);
+		printf("Proc %d Num of Empty Inverted Hash Table Access %d\n",i,procTable[i].numIHTNULLAccess);
+		printf("Proc %d Num of Non-Empty Inverted Hash Table Access %d\n",i,procTable[i].numIHTNonNULLAcess);
+		printf("Proc %d Num of Page Faults %d\n",i,procTable[i].numPageFault);
+		printf("Proc %d Num of Page Hit %d\n",i,procTable[i].numPageHit);
+		assert(procTable[i].numPageHit + procTable[i].numPageFault == procTable[i].ntraces);
+		assert(procTable[i].numIHTNULLAccess + procTable[i].numIHTNonNULLAcess == procTable[i].ntraces);
+	}
+}
+
 
 int main(int argc, char *argv[]) {
 	int i,c, simType;
@@ -327,6 +490,7 @@ int main(int argc, char *argv[]) {
 		frame_list[i].first_pn = 0;
 		frame_list[i].second_pn = 0;
 		frame_list[i].pfn = i;
+		frame_list[i].hash_index = -1;
 		
 		if (i == 0)
 		{
@@ -372,7 +536,7 @@ int main(int argc, char *argv[]) {
 		printf("=============================================================\n");
 		printf("The Inverted Page Table Memory Simulation Starts .....\n");
 		printf("=============================================================\n");
-	//	invertedPageVMSim(numProcess, nFrame);
+		invertedPageVMSim(numProcess, nFrame);
 	}
 
 	for (i = 0; i < numProcess; i++)
