@@ -41,6 +41,7 @@ struct pageFrame {
 	unsigned second_pn;
 	int pfn;
 	struct pageFrame *next;
+	struct pageFrame *prev;
 };
 
 struct procEntry *procTable;
@@ -73,31 +74,40 @@ void init_pageTable(int numProcess)
 	}
 }
 
+void move_head_to_tail()
+{
+	frame_list_tail->next = frame_list_head;
+	frame_list_head->prev = frame_list_tail;
+	frame_list_head = frame_list_head->next;
+	frame_list_tail = frame_list_tail->next;
+	frame_list_head->prev = NULL;
+	frame_list_tail->next = NULL;	
+}
+
 void lru(int hitted_pfn)
 {
-	struct pageFrame *p = frame_list_head;
-	struct pageFrame *p_late = frame_list_head;
+	struct pageFrame * hitted = &frame_list[hitted_pfn];
 
 	if (frame_list_tail->pfn == hitted_pfn) //tail hit
 		return;
-
-	while (p != NULL && p->pfn != hitted_pfn)
+	else if (frame_list_head->pfn == hitted_pfn) //head hit
+		move_head_to_tail();
+	else
 	{
-		p_late = p;
-		p = p->next;
-	}
-	if (frame_list_head->pfn == hitted_pfn) //head hit
-		frame_list_head = frame_list_head->next;
+		hitted->prev->next = hitted->next;
+		hitted->next->prev = hitted->prev;
 
-	p_late->next = p->next;
-	frame_list_tail->next = p;
-	frame_list_tail = frame_list_tail->next;
-	frame_list_tail->next = NULL;
+		frame_list_tail->next = hitted;
+		hitted->prev = frame_list_tail;
+		frame_list_tail = frame_list_tail->next;
+		frame_list_tail->next = NULL;
+	}
 }
 
 void update(int i, unsigned new_vpn)
 {
-	if (frame_list_head->pid != -1) //invalid
+	//invalid
+	if (frame_list_head->pid != -1) 
 	{
 		procTable[frame_list_head->pid].pageTable[frame_list_head->vpn][0] = 0;
 		procTable[frame_list_head->pid].pageTable[frame_list_head->vpn][1] = 0;
@@ -107,12 +117,8 @@ void update(int i, unsigned new_vpn)
 	frame_list_head->vpn = new_vpn;
 	procTable[i].pageTable[new_vpn][0] = frame_list_head->pfn;
 	procTable[i].pageTable[new_vpn][1] = 1;
-
-	//update head & tail	
-	frame_list_tail->next = frame_list_head;
-	frame_list_head = frame_list_head->next;
-	frame_list_tail = frame_list_tail->next;
-	frame_list_tail->next = NULL;		
+	
+	move_head_to_tail();		
 }
 
 void oneLevelVMSim(int simType, int numProcess) {
@@ -208,13 +214,8 @@ void update_twolevel(int i, unsigned new_first_pn, unsigned new_second_pn)
 	frame_list_head->second_pn = new_second_pn;
 	procTable[i].first_pt[new_first_pn][new_second_pn][0] = frame_list_head->pfn;
 	procTable[i].first_pt[new_first_pn][new_second_pn][1] = 1;
-
-	//update head & tail	
-	frame_list_tail->next = frame_list_head;
-	frame_list_head = frame_list_head->next;
-	frame_list_tail = frame_list_tail->next;
-	frame_list_tail->next = NULL;	
-
+	
+	move_head_to_tail();
 }
 
 void twoLevelVMSim(int numProcess, int firstlevelBits) {
@@ -243,7 +244,7 @@ void twoLevelVMSim(int numProcess, int firstlevelBits) {
 			else
 			{	
 				procTable[i].ntraces++;
-				first_pn = va >> (32 - firstlevelBits);
+				first_pn = va >> (32 - firstlevelBits);  
 				second_pn = (va << firstlevelBits) >> (firstlevelBits+12);
 
 				if (procTable[i].first_pt[first_pn] != NULL && procTable[i].first_pt[first_pn][second_pn][1] == 1) //hit
@@ -256,7 +257,7 @@ void twoLevelVMSim(int numProcess, int firstlevelBits) {
 					procTable[i].numPageFault++;
 					if (procTable[i].first_pt[first_pn] == NULL)
 					{
-						init_second_page_table(i, first_pn, second_page_size);
+						init_second_page_table(i, first_pn, second_page_size); //create 2nd tabel
 						procTable[i].num2ndLevelPageTable++;
 					}
 					update_twolevel(i, first_pn, second_pn);
@@ -276,21 +277,6 @@ void twoLevelVMSim(int numProcess, int firstlevelBits) {
 		assert(procTable[i].numPageHit + procTable[i].numPageFault == procTable[i].ntraces);
 	}
 }
-
-/*void invertedPageVMSim(...) {
-
-	for(i=0; i < numProcess; i++) {
-		printf("**** %s *****\n",procTable[i].traceName);
-		printf("Proc %d Num of traces %d\n",i,procTable[i].ntraces);
-		printf("Proc %d Num of Inverted Hash Table Access Conflicts %d\n",i,procTable[i].numIHTConflictAccess);
-		printf("Proc %d Num of Empty Inverted Hash Table Access %d\n",i,procTable[i].numIHTNULLAccess);
-		printf("Proc %d Num of Non-Empty Inverted Hash Table Access %d\n",i,procTable[i].numIHTNonNULLAcess);
-		printf("Proc %d Num of Page Faults %d\n",i,procTable[i].numPageFault);
-		printf("Proc %d Num of Page Hit %d\n",i,procTable[i].numPageHit);
-		assert(procTable[i].numPageHit + procTable[i].numPageFault == procTable[i].ntraces);
-		assert(procTable[i].numIHTNULLAccess + procTable[i].numIHTNonNULLAcess == procTable[i].ntraces);
-	}
-}*/
 
 
 int main(int argc, char *argv[]) {
@@ -346,10 +332,12 @@ int main(int argc, char *argv[]) {
 		{
 			frame_list_head = frame_list;
 			frame_list_tail = frame_list;
+			frame_list_head->prev = NULL;
 		}
 		else
 		{
 			frame_list_tail->next = &frame_list[i];
+			frame_list_tail->next->prev = frame_list_tail;
 			frame_list_tail = frame_list_tail->next; 
 		}
 	}
@@ -384,7 +372,7 @@ int main(int argc, char *argv[]) {
 		printf("=============================================================\n");
 		printf("The Inverted Page Table Memory Simulation Starts .....\n");
 		printf("=============================================================\n");
-	//	invertedPageVMSim(...);
+	//	invertedPageVMSim(numProcess, nFrame);
 	}
 
 	for (i = 0; i < numProcess; i++)
