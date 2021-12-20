@@ -280,7 +280,7 @@ void sfs_mkdir(const char* org_path)
 	int i, j;
 	struct sfs_inode cwd_inode;
 	struct sfs_dir dir_entry[SFS_DENTRYPERBLOCK];
-	int newbie_ino;
+	int newbie_ino, newbie_data_ino;
 
 	disk_read(&cwd_inode, sd_cwd.sfd_ino);
 
@@ -322,8 +322,16 @@ void sfs_mkdir(const char* org_path)
 				bzero(&newbie,SFS_BLOCKSIZE); 
 				newbie.sfi_size = sizeof(struct sfs_dir) * 2;
 				newbie.sfi_type = SFS_TYPE_DIR;
+				
+				newbie_data_ino = find_emptyBlock();
+				if (newbie_data_ino == -1)
+				{
+					error_message("mkdir", org_path, -4); // disk full
+					return;
+				}
+				newbie.sfi_direct[0] = newbie_data_ino;
 				disk_write( &newbie, newbie_ino);              //update new inode
-
+				
 				struct sfs_dir newbie_entry[SFS_DENTRYPERBLOCK];
 				bzero(newbie_entry,SFS_DENTRYPERBLOCK);
 				newbie_entry[0].sfd_ino = newbie_ino;
