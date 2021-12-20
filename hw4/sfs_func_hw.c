@@ -101,57 +101,94 @@ void sfs_umount() {
 	}
 }
 
+int find_emptyBlock()
+{
+	int i, j, k;
+	char bitmap[SFS_BLOCKSIZE];
+	int map_loc = SFS_MAP_LOCATION;
+
+	for (i = 0; i < SFS_BITBLOCKS(spb.sp_nblocks); i++)  
+	{
+		disk_read(bitmap, map_loc);
+		for (j = 0; j < SFS_BLOCKSIZE; j++) // 
+		{
+			if (bitmap[j] != (char)255) 
+			{
+				for (k = 0; k < 8; k++)
+				{
+					if (BIT_CHECK(bitmap[j], k) == 0)
+					{
+						BIT_SET(bitmap[j], k);
+						disk_write(bitmap, map_loc);
+						return ((i * SFS_BLOCKBITS) + (j * 8) + k );
+					}
+				}
+			}	
+		}
+		map_loc++;
+	}
+	return (-1); //full
+}
+
 void sfs_touch(const char* path)
 {
-	//skeleton implementation
+ 	int i, j;
+	struct sfs_inode cwd_inode;
+	struct sfs_dir dir_entry[SFS_DENTRYPERBLOCK];
+	int newbie_ino;
 
-	struct sfs_inode si;
-	disk_read( &si, sd_cwd.sfd_ino );
+	disk_read(&cwd_inode, sd_cwd.sfd_ino);
 
-	//for consistency
-	assert( si.sfi_type == SFS_TYPE_DIR );
+	for (i = 0; i < SFS_NDIRECT; i++)
+	{
+		if (cwd_inode.sfi_direct[i] == 0) break;
+		disk_read( dir_entry, cwd_inode.sfi_direct[i]);
+		for (j = 0; j < SFS_DENTRYPERBLOCK; j++)
+		{
+			if (strcmp(path, dir_entry[j].sfd_name) == 0)
+			{
+				error_message("touch", path, -6);  //already in
+				return;
+			}
+		}
+	}
+	for (i = 0; i < SFS_NDIRECT; i++)
+	{
+		if (cwd_inode.sfi_direct[i] == 0) break;
+		disk_read( dir_entry, cwd_inode.sfi_direct[i]);
+		for (j = 0; j < SFS_DENTRYPERBLOCK; j++)
+		{
+			if (dir_entry[j].sfd_ino == 0) //new block
+			{
+				newbie_ino = find_emptyBlock();
+				if (newbie_ino == -1)
+				{
+					error_message("touch", path, -4); // disk full
+					return;
+				}
+				dir_entry[j].sfd_ino = newbie_ino;
+				strncpy( dir_entry[j].sfd_name, path, SFS_NAMELEN );
+				disk_write(dir_entry, cwd_inode.sfi_direct[i]);        //update new directory entry 
 
-	//we assume that cwd is the root directory and root directory is empty which has . and .. only
-	//unused DISK2.img satisfy these assumption
-	//for new directory entry(for new file), we use cwd.sfi_direct[0] and offset 2
-	//becasue cwd.sfi_directory[0] is already allocated, by .(offset 0) and ..(offset 1)
-	//for new inode, we use block 6 
-	// block 0: superblock,	block 1:root, 	block 2:bitmap 
-	// block 3:bitmap,  	block 4:bitmap 	block 5:root.sfi_direct[0] 	block 6:unused
-	//
-	//if used DISK2.img is used, result is not defined
-	
-	//buffer for disk read
-	struct sfs_dir sd[SFS_DENTRYPERBLOCK];
+				cwd_inode.sfi_size += sizeof(struct sfs_dir);
+				disk_write( &cwd_inode, sd_cwd.sfd_ino );              //update cwd
 
-	//block access
-	disk_read( sd, si.sfi_direct[0] );
-
-	//allocate new block
-	int newbie_ino = 6;
-
-	sd[2].sfd_ino = newbie_ino;
-	strncpy( sd[2].sfd_name, path, SFS_NAMELEN );
-
-	disk_write( sd, si.sfi_direct[0] );
-
-	si.sfi_size += sizeof(struct sfs_dir);
-	disk_write( &si, sd_cwd.sfd_ino );
-
-	struct sfs_inode newbie;
-
-	bzero(&newbie,SFS_BLOCKSIZE); // initalize sfi_direct[] and sfi_indirect
-	newbie.sfi_size = 0;
-	newbie.sfi_type = SFS_TYPE_FILE;
-
-	disk_write( &newbie, newbie_ino );
+				struct sfs_inode newbie;
+				bzero(&newbie,SFS_BLOCKSIZE); 
+				newbie.sfi_size = 0;
+				newbie.sfi_type = SFS_TYPE_FILE;
+				disk_write( &newbie, newbie_ino);           //update new inode
+				return;
+			}	
+		}
+	}
+	error_message("touch", path, -3);  //directory full
 }
 
 void sfs_cd(const char* path)
 {
 	int i, j;
 	struct sfs_inode cwd_inode;
-	struct sfs_inode inode;
 	struct sfs_dir dir_entry[SFS_DENTRYPERBLOCK];
 
 	if (!path)
@@ -175,7 +212,7 @@ void sfs_cd(const char* path)
 				disk_read( &cwd_inode, dir_entry[j].sfd_ino);
 				if (cwd_inode.sfi_type == SFS_TYPE_FILE)
 				{
-					error_message("cd", path, -2);
+					error_message("cd", path, -2);  //not a directory
 					return;
 				}
 				sd_cwd = dir_entry[j];
@@ -183,10 +220,8 @@ void sfs_cd(const char* path)
 			}
 		}
 	}
-	error_message("cd",path,-1);
+	error_message("cd",path,-1);  // no such file or directory
 	return;
-
-
 }
 
 void sfs_ls(const char* path)
@@ -219,7 +254,7 @@ void sfs_ls(const char* path)
 				}
 			}
 		}
-		error_message("ls",path,-1);
+		error_message("ls",path,-1);  // no such file or directory
 		return;
 	}
 	
@@ -242,22 +277,241 @@ ls :
 
 void sfs_mkdir(const char* org_path) 
 {
-	printf("Not Implemented\n");
+	int i, j;
+	struct sfs_inode cwd_inode;
+	struct sfs_dir dir_entry[SFS_DENTRYPERBLOCK];
+	int newbie_ino;
+
+	disk_read(&cwd_inode, sd_cwd.sfd_ino);
+
+	for (i = 0; i < SFS_NDIRECT; i++)
+	{
+		if (cwd_inode.sfi_direct[i] == 0) break;
+		disk_read( dir_entry, cwd_inode.sfi_direct[i]);
+		for (j = 0; j < SFS_DENTRYPERBLOCK; j++)
+		{
+			if (strcmp(org_path, dir_entry[j].sfd_name) == 0)
+			{
+				error_message("mkdir", org_path, -6);  //already in
+				return;
+			}
+		}
+	}
+	for (i = 0; i < SFS_NDIRECT; i++)
+	{
+		if (cwd_inode.sfi_direct[i] == 0) break;
+		disk_read( dir_entry, cwd_inode.sfi_direct[i]);
+		for (j = 0; j < SFS_DENTRYPERBLOCK; j++)
+		{
+			if (dir_entry[j].sfd_ino == 0) //new block
+			{
+				newbie_ino = find_emptyBlock();
+				if (newbie_ino == -1)
+				{
+					error_message("mkdir", org_path, -4); // disk full
+					return;
+				}
+				dir_entry[j].sfd_ino = newbie_ino;
+				strncpy( dir_entry[j].sfd_name, org_path, SFS_NAMELEN );
+				disk_write(dir_entry, cwd_inode.sfi_direct[i]);        //update cwd directory entry 
+
+				cwd_inode.sfi_size += sizeof(struct sfs_dir);
+				disk_write( &cwd_inode, sd_cwd.sfd_ino );              //update cwd
+
+				struct sfs_inode newbie;
+				bzero(&newbie,SFS_BLOCKSIZE); 
+				newbie.sfi_size = sizeof(struct sfs_dir) * 2;
+				newbie.sfi_type = SFS_TYPE_DIR;
+				disk_write( &newbie, newbie_ino);              //update new inode
+
+				struct sfs_dir newbie_entry[SFS_DENTRYPERBLOCK];
+				bzero(newbie_entry,SFS_DENTRYPERBLOCK);
+				newbie_entry[0].sfd_ino = newbie_ino;
+				strncpy(newbie_entry[0].sfd_name, ".", SFS_NAMELEN);
+				newbie_entry[1].sfd_ino = sd_cwd.sfd_ino;
+				strncpy(newbie_entry[1].sfd_name, "..", SFS_NAMELEN);
+				disk_write(newbie_entry, newbie.sfi_direct[0]);    //update new inode's directory entry
+				return;
+			}	
+		}
+	}
+	error_message("mkdir", org_path, -3);  //directory full
 }
 
 void sfs_rmdir(const char* org_path) 
 {
-	printf("Not Implemented\n");
+	int i, j, k;
+	struct sfs_inode cwd_inode;
+	struct sfs_inode rm_inode;
+	struct sfs_dir dir_entry[SFS_DENTRYPERBLOCK];
+	char bitmap[SFS_BLOCKSIZE];
+	int bitmap_block;
+
+	if (strcmp(org_path, "..") == 0)
+	{
+		error_message("rmdir", org_path, -7);  //not empty
+		return;
+	}
+	if (strcmp(org_path, ".") == 0)
+	{
+		error_message("rmdir", org_path, -8);  //invalid
+		return;
+	}
+
+	disk_read( &cwd_inode, sd_cwd.sfd_ino);
+
+	for (i = 0; i < SFS_NDIRECT; i++)
+	{
+		if (cwd_inode.sfi_direct[i] == 0) break;
+		disk_read( dir_entry, cwd_inode.sfi_direct[i]);
+		for (j = 0; j < SFS_DENTRYPERBLOCK; j++)
+		{
+			if (strcmp(org_path, dir_entry[j].sfd_name) == 0)
+			{
+				disk_read( &rm_inode, dir_entry[j].sfd_ino);
+				if (rm_inode.sfi_type == SFS_TYPE_FILE)
+				{
+					error_message("rmdir", org_path, -2);  //not a directory
+					return;
+				}
+				if (rm_inode.sfi_size != 2 * sizeof(struct sfs_dir))
+				{
+					error_message("rmdir", org_path, -7);  //not empty
+					return;
+				}
+				for (k = 0; k < SFS_NDIRECT; k++)
+				{
+					if (rm_inode.sfi_direct[k] != 0)
+					{
+						bitmap_block = rm_inode.sfi_direct[k] / SFS_BLOCKBITS;
+						disk_read(bitmap, SFS_MAP_LOCATION + bitmap_block);
+						BIT_CLEAR(bitmap[rm_inode.sfi_direct[k] / 8], rm_inode.sfi_direct[k] % 8);
+						disk_write(bitmap, SFS_MAP_LOCATION + bitmap_block);
+					}
+				}
+
+				bitmap_block = dir_entry[j].sfd_ino / SFS_BLOCKBITS;
+				disk_read(bitmap, SFS_MAP_LOCATION + bitmap_block);
+				BIT_CLEAR(bitmap[dir_entry[j].sfd_ino / 8], dir_entry[j].sfd_ino % 8);
+				disk_write(bitmap, SFS_MAP_LOCATION + bitmap_block);
+				
+				cwd_inode.sfi_size -= sizeof(struct sfs_dir);
+				disk_write(&cwd_inode, sd_cwd.sfd_ino);              //update cwd
+
+				bzero(&dir_entry[j], sizeof(struct sfs_dir)); 
+				disk_write( dir_entry, cwd_inode.sfi_direct[i]);   
+			
+				return;
+			}
+		}
+	}
+	error_message("rmdir",org_path,-1);  // no such file or directory
+	return;
 }
 
 void sfs_mv(const char* src_name, const char* dst_name) 
 {
-	printf("Not Implemented\n");
+	int i, j;
+	int i_, j_;
+	int flag = 0;
+	struct sfs_inode cwd_inode;
+	struct sfs_dir dir_entry[SFS_DENTRYPERBLOCK];
+
+	if (!strcmp(".", src_name) || !strcmp("..", src_name))
+	{
+		error_message("mv", src_name, -8);   //invalid
+		return;
+	}
+	if (!strcmp(".", dst_name) || !strcmp("..", dst_name))
+	{
+		error_message("mv", dst_name, -8);   //invalid
+		return;
+	}
+
+	disk_read( &cwd_inode, sd_cwd.sfd_ino);
+
+	for (i = 0; i < SFS_NDIRECT; i++)
+	{
+		if (cwd_inode.sfi_direct[i] == 0) break;
+		disk_read( dir_entry, cwd_inode.sfi_direct[i]);
+		for (j = 0; j < SFS_DENTRYPERBLOCK; j++)
+		{	
+			if (strcmp(dst_name, dir_entry[j].sfd_name) == 0)
+			{
+				error_message("mv", dst_name, -6);
+				return;
+			}
+			if (flag == 0 && strcmp(src_name, dir_entry[j].sfd_name) == 0)
+			{
+				i_ = i;
+				j_ = j;
+				flag = 1;
+			}
+		}
+	}
+	if (flag == 0)
+	{
+		error_message("mv", src_name, -1);  // no such file or directory
+		return;
+	}
+	disk_read(dir_entry, cwd_inode.sfi_direct[i_]);
+	strcpy(dir_entry[j_].sfd_name, dst_name);
+	disk_write(dir_entry, cwd_inode.sfi_direct[i_]);
 }
 
 void sfs_rm(const char* path) 
 {
-	printf("Not Implemented\n");
+	int i, j, k;
+	struct sfs_inode cwd_inode;
+	struct sfs_inode rm_inode;
+	struct sfs_dir dir_entry[SFS_DENTRYPERBLOCK];
+	char bitmap[SFS_BLOCKSIZE];
+	int bitmap_block;
+
+	disk_read( &cwd_inode, sd_cwd.sfd_ino);
+
+	for (i = 0; i < SFS_NDIRECT; i++)
+	{
+		if (cwd_inode.sfi_direct[i] == 0) break;
+		disk_read( dir_entry, cwd_inode.sfi_direct[i]);
+		for (j = 0; j < SFS_DENTRYPERBLOCK; j++)
+		{
+			if (strcmp(path, dir_entry[j].sfd_name) == 0)
+			{
+				disk_read( &rm_inode, dir_entry[j].sfd_ino);
+				if (rm_inode.sfi_type == SFS_TYPE_DIR)
+				{
+					error_message("cd", path, -9);  //is a directory
+					return;
+				}
+				for (k = 0; k < SFS_NDIRECT; k++)
+				{
+					if (rm_inode.sfi_direct[k] != 0)
+					{
+						bitmap_block = rm_inode.sfi_direct[k] / SFS_BLOCKBITS;
+						disk_read(bitmap, SFS_MAP_LOCATION + bitmap_block);
+						BIT_CLEAR(bitmap[rm_inode.sfi_direct[k] / 8], rm_inode.sfi_direct[k] % 8);
+						disk_write(bitmap, SFS_MAP_LOCATION + bitmap_block);
+					}
+				}
+
+				bitmap_block = dir_entry[j].sfd_ino / SFS_BLOCKBITS;
+				disk_read(bitmap, SFS_MAP_LOCATION + bitmap_block);
+				BIT_CLEAR(bitmap[dir_entry[j].sfd_ino / 8], dir_entry[j].sfd_ino % 8);
+				disk_write(bitmap, SFS_MAP_LOCATION + bitmap_block);
+				
+				cwd_inode.sfi_size -= sizeof(struct sfs_dir);
+				disk_write(&cwd_inode, sd_cwd.sfd_ino);              //update cwd
+
+				bzero(&dir_entry[j], sizeof(struct sfs_dir)); 
+				disk_write( dir_entry, cwd_inode.sfi_direct[i]);   
+			
+				return;
+			}
+		}
+	}
+	error_message("rm",path,-1);  // no such file or directory
+	return;
 }
 
 void sfs_cpin(const char* local_path, const char* path) 
