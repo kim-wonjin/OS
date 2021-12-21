@@ -299,7 +299,7 @@ void sfs_mkdir(const char* org_path)
 	}
 	for (i = 0; i < SFS_NDIRECT; i++)
 	{
-		if (cwd_inode.sfi_direct[i] == 0) break;
+		//if (cwd_inode.sfi_direct[i] == 0) break;
 		disk_read( dir_entry, cwd_inode.sfi_direct[i]);
 		for (j = 0; j < SFS_DENTRYPERBLOCK; j++)
 		{
@@ -319,7 +319,7 @@ void sfs_mkdir(const char* org_path)
 				disk_write( &cwd_inode, sd_cwd.sfd_ino );              //update cwd
 
 				struct sfs_inode newbie;
-				bzero(&newbie,SFS_BLOCKSIZE); 
+				bzero(&newbie, SFS_BLOCKSIZE); 
 				newbie.sfi_size = sizeof(struct sfs_dir) * 2;
 				newbie.sfi_type = SFS_TYPE_DIR;
 				
@@ -333,7 +333,7 @@ void sfs_mkdir(const char* org_path)
 				disk_write( &newbie, newbie_ino);              //update new inode
 				
 				struct sfs_dir newbie_entry[SFS_DENTRYPERBLOCK];
-				bzero(newbie_entry,SFS_DENTRYPERBLOCK);
+				bzero(newbie_entry,SFS_DENTRYPERBLOCK * sizeof(struct sfs_dir));
 				newbie_entry[0].sfd_ino = newbie_ino;
 				strncpy(newbie_entry[0].sfd_name, ".", SFS_NAMELEN);
 				newbie_entry[1].sfd_ino = sd_cwd.sfd_ino;
