@@ -1,4 +1,5 @@
 //
+// OS 2021
 // Simple FIle System
 // Student Name : 김원진
 // Student Number : B911040
@@ -280,7 +281,7 @@ void sfs_mkdir(const char* org_path)
 	int i, j;
 	struct sfs_inode cwd_inode;
 	struct sfs_dir dir_entry[SFS_DENTRYPERBLOCK];
-	int newbie_ino, newbie_data_ino;
+	int newbie_ino, newbie_data_ino, new_direct;
 
 	disk_read(&cwd_inode, sd_cwd.sfd_ino);
 
@@ -299,8 +300,21 @@ void sfs_mkdir(const char* org_path)
 	}
 	for (i = 0; i < SFS_NDIRECT; i++)
 	{
-		//if (cwd_inode.sfi_direct[i] == 0) break;
-		disk_read( dir_entry, cwd_inode.sfi_direct[i]);
+		if (cwd_inode.sfi_direct[i] == 0)
+		{
+			new_direct = find_emptyBlock();
+			if (new_direct == -1)
+				{
+					error_message("mkdir", org_path, -4); // disk full
+					return;
+				}
+			cwd_inode.sfi_direct[i] = new_direct;
+			bzero(dir_entry, SFS_DENTRYPERBLOCK * sizeof(struct sfs_dir));
+			disk_write(&cwd_inode,sd_cwd.sfd_ino);
+			disk_write(dir_entry, cwd_inode.sfi_direct[i]);
+
+		}
+		disk_read(dir_entry, cwd_inode.sfi_direct[i]);
 		for (j = 0; j < SFS_DENTRYPERBLOCK; j++)
 		{
 			if (dir_entry[j].sfd_ino == 0) //new block
