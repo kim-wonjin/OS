@@ -1,7 +1,7 @@
 //
 // Simple FIle System
-// Student Name :
-// Student Number :
+// Student Name : 김원진
+// Student Number : B911040
 //
 #include <stdio.h>
 #include <stdlib.h>
@@ -489,7 +489,7 @@ void sfs_rm(const char* path)
 				disk_read( &rm_inode, dir_entry[j].sfd_ino);
 				if (rm_inode.sfi_type == SFS_TYPE_DIR)
 				{
-					error_message("cd", path, -9);  //is a directory
+					error_message("rm", path, -9);  //is a directory
 					return;
 				}
 				for (k = 0; k < SFS_NDIRECT; k++)
